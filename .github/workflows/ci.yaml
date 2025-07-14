@@ -1,8 +1,13 @@
 name: ci
 
 on:
-  pull_request:
   push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+  pull_request:
+    paths-ignore:
+      - '**.md'
 
 jobs:
   Build:
@@ -11,18 +16,52 @@ jobs:
       matrix:
         go-version: [stable, oldstable]
         platform: [ubuntu-latest, windows-latest, macos-latest]
+
     runs-on: ${{ matrix.platform }}
+
     steps:
-      - name: Setup git
-        # required to run tests on windows
+      - name: Setup Git (Windows only)
+        if: runner.os == 'Windows'
         run: |
           git config --global core.autocrlf false
           git config --global core.symlinks true
-      - name: Fetch Repository
+
+      - name: Checkout Repository
         uses: actions/checkout@v4
-      - name: Install Go
+
+      - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
-      - run: go build .
-      - run: ./gotestsum -f testname -- ./... -race -count=1
+
+      - name: Install gotestsum
+        run: |
+          go install gotest.tools/gotestsum@latest
+        shell: bash
+
+      - name: Build
+        run: go build -v .
+        shell: bash
+
+      - name: Run Tests
+        run: |
+          $HOME/go/bin/gotestsum --junitfile junit.xml --format short-verbose -- -race -count=1 -coverprofile=coverage.out ./...
+        shell: bash
+
+      - name: Upload Test Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.platform }}-${{ matrix.go-version }}
+          path: |
+            junit.xml
+            coverage.out
+
+      - name: Upload Code Coverage
+        if: matrix.platform == 'ubuntu-latest' && matrix.go-version == 'stable'
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.out
+          flags: unit-tests
+          name: boomchainlab-go-ci
+          fail_ci_if_error: false
